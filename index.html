@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<meta name="color-scheme" content="dark light">
+<title>Checkpoint Verification System</title>
+<link rel="manifest" href="data:application/manifest+json,{&quot;name&quot;:&quot;Checkpoint%20Verification&quot;,&quot;short_name&quot;:&quot;Checkpoint&quot;,&quot;start_url&quot;:&quot;.&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;%230B1220&quot;,&quot;theme_color&quot;:&quot;%230B1220&quot;}">
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+  // Apply saved theme before first paint to avoid a flash of the wrong theme.
+  (function(){
+    try {
+      var t = localStorage.getItem('cp_theme');
+      if (!t) t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
+<style>
+  :root{
+    --bg:#0B1220;
+    --panel:#141F2E;
+    --panel-2:#1B2838;
+    --line:#26374D;
+    --text:#E8EEF6;
+    --muted:#8CA0B8;
+    --accent:#4FA8FF;
+    --accent-dim:#1E3A57;
+    --green:#2ECC71;
+    --yellow:#F4C430;
+    --orange:#FF8C42;
+    --red:#E8543E;
+    --gray:#5A6B80;
+    --mono: 'JetBrains Mono', 'Courier New', monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --display: 'Space Grotesk', var(--sans);
+  }
+  [data-theme="light"]{
+    --bg:#F3F5F9;
+    --panel:#FFFFFF;
+    --panel-2:#EEF1F6;
+    --line:#D7DEE8;
+    --text:#101828;
+    --muted:#5B6B80;
+    --accent:#1467D6;
+    --accent-dim:#DCEAFB;
+    --green:#188A4C;
+    --yellow:#9A6A00;
+    --orange:#C25A00;
+    --red:#C6301D;
+    --gray:#6B7A8D;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg); color:var(--text); font-family:var(--sans);
+    -webkit-tap-highlight-color: transparent; overscroll-behavior:none;
+    transition:background .2s, color .2s;
+  }
+
+  /* ---------- Theme toggle (floating, visible on every screen) ---------- */
+  .theme-toggle{
+    position:fixed; top:12px; right:12px; z-index:200;
+    width:38px; height:38px; border-radius:50%; border:1px solid var(--line);
+    background:var(--panel); color:var(--text); font-size:17px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; box-shadow:0 2px 8px rgba(0,0,0,.18);
+  }
+  .theme-toggle:active{transform:scale(0.94);}
+
+  /* ---------- Flashlight/torch button ---------- */
+  .torch-btn{
+    display:none; align-items:center; justify-content:center; gap:8px;
+    width:100%; padding:14px; border-radius:12px; margin-top:12px;
+    background:var(--panel-2); border:1px solid var(--line); color:var(--text);
+    font-size:14px; font-weight:700; cursor:pointer;
+  }
+  .torch-btn.torch-active{background:rgba(244,196,48,.18); border-color:var(--yellow); color:var(--yellow);}
+
+  /* Light theme: borders alone are subtle on white, so add a soft shadow
+     to keep cards/tiles/rows visually separated from the page background. */
+  [data-theme="light"] .card,
+  [data-theme="light"] .tile,
+  [data-theme="light"] .stat,
+  [data-theme="light"] .admin-row,
+  [data-theme="light"] .topbar,
+  [data-theme="light"] .tabs{
+    box-shadow:0 1px 3px rgba(16,24,40,.06), 0 1px 2px rgba(16,24,40,.04);
+  }
+  .screen{display:none; min-height:100vh; flex-direction:column;}
+  .screen.active{display:flex;}
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 16px; background:var(--panel); border-bottom:1px solid var(--line);
+    position:sticky; top:0; z-index:20;
+  }
+  .topbar .brand{display:flex; align-items:center; gap:10px;}
+  .beacon{width:10px; height:10px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 0 rgba(79,168,255,.6); animation:pulse 2s infinite;}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(79,168,255,.55);}
+    70%{box-shadow:0 0 0 9px rgba(79,168,255,0);}
+    100%{box-shadow:0 0 0 0 rgba(79,168,255,0);}
+  }
+  .brand-text{font-family:var(--display); font-weight:600; font-size:15px; letter-spacing:.2px;}
+  .brand-sub{font-size:11px; color:var(--muted);}
+  .topbar-right{display:flex; align-items:center; gap:10px; font-size:12px; color:var(--muted);}
+  .link-btn{background:none; border:none; color:var(--accent); font-size:13px; font-weight:600; cursor:pointer; padding:6px;}
+
+  .content{flex:1; padding:18px 16px 90px; max-width:560px; width:100%; margin:0 auto;}
+
+  h1,h2,h3{font-family:var(--display); font-weight:600;}
+  h1{font-size:22px; margin-bottom:4px;}
+  h2{font-size:17px; margin-bottom:12px;}
+  p.sub{color:var(--muted); font-size:13px; margin-bottom:20px;}
+
+  /* ---------- Form elements ---------- */
+  label{display:block; font-size:12px; color:var(--muted); margin:14px 0 6px; font-weight:600; text-transform:uppercase; letter-spacing:.5px;}
+  label .req{color:var(--orange);}
+  input, select{
+    width:100%; padding:13px 14px; background:var(--panel-2); border:1px solid var(--line);
+    border-radius:10px; color:var(--text); font-size:15px; font-family:var(--sans);
+  }
+  input.mono{font-family:var(--mono); letter-spacing:1px; font-weight:700; font-size:17px;}
+  input:focus, select:focus{outline:none; border-color:var(--accent);}
+  input::placeholder{color:var(--muted); opacity:.75;}
+
+  .btn{
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    width:100%; padding:15px; border-radius:12px; border:none; font-size:15px;
+    font-weight:700; font-family:var(--sans); cursor:pointer; margin-top:14px;
+  }
+  .btn-primary{background:var(--accent); color:#04162B;}
+  .btn-secondary{background:var(--panel-2); color:var(--text); border:1px solid var(--line);}
+  .btn-danger{background:rgba(232,84,62,.15); color:var(--red); border:1px solid rgba(232,84,62,.4);}
+  .btn-lg{padding:22px; font-size:16px; border-radius:16px;}
+  .btn:active{transform:scale(0.98);}
+  .btn:disabled{opacity:.5;}
+
+  /* ---------- Home tiles ---------- */
+  .tile{
+    background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:22px;
+    margin-bottom:14px; cursor:pointer; display:flex; align-items:center; gap:16px;
+  }
+  .tile-icon{
+    width:48px; height:48px; border-radius:12px; display:flex; align-items:center; justify-content:center;
+    font-size:22px; flex-shrink:0;
+  }
+  .tile-verify .tile-icon{background:rgba(79,168,255,.15); color:var(--accent);}
+  .tile-register .tile-icon{background:rgba(46,204,113,.15); color:var(--green);}
+  .tile-title{font-family:var(--display); font-weight:600; font-size:16px;}
+  .tile-sub{color:var(--muted); font-size:12.5px; margin-top:2px;}
+
+  .stat-row{display:flex; gap:10px; margin-top:18px;}
+  .stat{flex:1; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; text-align:center;}
+  .stat-num{font-family:var(--mono); font-size:22px; font-weight:700; color:var(--accent);}
+  .stat-label{font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-top:2px;}
+
+  /* ---------- Camera ---------- */
+  .camera-wrap{position:relative; background:#000; border-radius:16px; overflow:hidden; aspect-ratio:4/3;}
+  video{width:100%; height:100%; object-fit:cover; display:block;}
+  .scan-frame{
+    position:absolute; left:8%; right:8%; top:38%; height:24%;
+    border:2px solid var(--accent); border-radius:10px;
+    box-shadow:0 0 0 2000px rgba(0,0,0,.45);
+    transition:left .15s,right .15s,top .15s,height .15s;
+  }
+  /* Wider box sized for a landscape ID card (~1.586 aspect) instead of a plate strip */
+  .scan-frame.scan-frame-card{left:5%; right:5%; top:22%; height:56%;}
+  .scan-line{
+    position:absolute; left:0; right:0; height:2px; background:var(--accent);
+    box-shadow:0 0 8px var(--accent); animation:sweep 1.8s ease-in-out infinite;
+  }
+  @keyframes sweep{
+    0%{top:0;} 50%{top:100%;} 100%{top:0;}
+  }
+  .scan-hint{position:absolute; bottom:10px; left:0; right:0; text-align:center; color:#fff; font-size:12px; opacity:.85;}
+  canvas{display:none;}
+
+  /* ---------- Status badges ---------- */
+  .badge{
+    display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:20px;
+    font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.3px;
+  }
+  .badge-dot{width:7px; height:7px; border-radius:50%;}
+  .badge-green{background:rgba(46,204,113,.15); color:var(--green);}
+  .badge-green .badge-dot{background:var(--green);}
+  .badge-yellow{background:rgba(244,196,48,.15); color:var(--yellow);}
+  .badge-yellow .badge-dot{background:var(--yellow);}
+  .badge-orange{background:rgba(255,140,66,.15); color:var(--orange);}
+  .badge-orange .badge-dot{background:var(--orange);}
+  .badge-red{background:rgba(232,84,62,.15); color:var(--red);}
+  .badge-red .badge-dot{background:var(--red);}
+  .badge-gray{background:rgba(90,107,128,.2); color:var(--muted);}
+  .badge-gray .badge-dot{background:var(--gray);}
+
+  /* ---------- Result cards ---------- */
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:18px; margin-bottom:14px;}
+  .card-head{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;}
+  .plate-chip{
+    font-family:var(--mono); font-weight:700; font-size:20px; letter-spacing:2px;
+    border:2px solid var(--text); border-radius:8px; padding:6px 12px; display:inline-block;
+  }
+  .field-row{display:flex; justify-content:space-between; padding:9px 0; border-top:1px solid var(--line); font-size:13.5px;}
+  .field-row:first-of-type{border-top:none;}
+  .field-label{color:var(--muted);}
+  .field-val{font-weight:600; text-align:right;}
+  .alert-box{
+    background:rgba(255,140,66,.1); border:1px solid rgba(255,140,66,.35); border-radius:10px;
+    padding:12px 14px; font-size:13px; color:var(--orange); margin-top:10px; line-height:1.5;
+  }
+  .not-found-box{
+    background:rgba(232,84,62,.08); border:1px dashed rgba(232,84,62,.4); border-radius:12px;
+    padding:20px; text-align:center; color:var(--muted); font-size:13.5px;
+  }
+
+  /* ---------- Admin table ---------- */
+  .tabs{display:flex; gap:6px; margin-bottom:16px; background:var(--panel); padding:4px; border-radius:12px; border:1px solid var(--line);}
+  .tab{flex:1; text-align:center; padding:9px; border-radius:9px; font-size:12.5px; font-weight:600; cursor:pointer; color:var(--muted);}
+  .tab.active{background:var(--accent); color:#04162B;}
+  .admin-row{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:10px; font-size:13px;}
+  .admin-row-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
+  .admin-row-actions{display:flex; gap:8px; margin-top:10px;}
+  .admin-row-actions button{flex:1; padding:9px; font-size:12px; border-radius:8px; border:1px solid var(--line); background:var(--panel-2); color:var(--text); cursor:pointer;}
+  .search-box{margin-bottom:14px;}
+  .empty-note{color:var(--muted); font-size:13px; text-align:center; padding:30px 0;}
+  .toast{
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--panel-2);
+    border:1px solid var(--line); padding:12px 20px; border-radius:10px; font-size:13px; z-index:100;
+    opacity:0; transition:opacity .25s; pointer-events:none;
+  }
+  .toast.show{opacity:1;}
+  .back-btn{background:none; border:none; color:var(--accent); font-size:14px; font-weight:600; cursor:pointer; padding:6px 0; margin-bottom:6px; display:flex; align-items:center; gap:4px;}
+  .spinner{
+    width:34px; height:34px; border:3px solid var(--line); border-top-color:var(--accent);
+    border-radius:50%; animation:spin 0.8s linear infinite; margin:20px auto;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .config-warn{
+    background:rgba(232,84,62,.12); border:1px solid rgba(232,84,62,.4); color:var(--red);
+    padding:14px; border-radius:10px; font-size:13px; margin-bottom:16px; line-height:1.5;
+  }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Switch theme" aria-label="Switch theme">🌙</button>
+
+<!-- ============ LOGIN ============ -->
+<div class="screen active" id="screen-login">
+  <div class="content" style="padding-top:70px;">
+    <div style="text-align:center; margin-bottom:36px;">
+      <div style="font-size:38px; margin-bottom:10px;">🛡️</div>
+      <h1>Checkpoint Verification</h1>
+      <p class="sub">Vehicle & driver clearance system</p>
+    </div>
+    <div id="configWarn" class="config-warn" style="display:none;">
+      API URL not configured yet. Open index.html and set CONFIG.API_URL to your deployed Apps Script Web App URL.
+    </div>
+    <label>Officer Name <span class="req">*</span></label>
+    <input type="text" id="loginOfficer" placeholder="e.g. PO2 Dela Cruz">
+    <label>Checkpoint Location</label>
+    <input type="text" id="loginLocation" placeholder="e.g. Brgy. Poblacion, Lagonglong">
+    <button class="btn btn-primary btn-lg" onclick="startShift()">Start Shift</button>
+    <button class="btn btn-secondary" onclick="showScreen('screen-admin-login')" style="margin-top:24px;">Admin Login</button>
+  </div>
+</div>
+
+<!-- ============ HOME ============ -->
+<div class="screen" id="screen-home">
+  <div class="topbar">
+    <div class="brand">
+      <div class="beacon"></div>
+      <div>
+        <div class="brand-text">Checkpoint</div>
+        <div class="brand-sub" id="officerBar">—</div>
+      </div>
+    </div>
+    <button class="link-btn" onclick="endShift()">End Shift</button>
+  </div>
+  <div class="content">
+    <div class="tile tile-verify" onclick="openCamera('verify')">
+      <div class="tile-icon">🔍</div>
+      <div>
+        <div class="tile-title">Scan & Verify</div>
+        <div class="tile-sub">Check a vehicle already on file</div>
+      </div>
+    </div>
+    <div class="tile tile-register" onclick="openCamera('register')">
+      <div class="tile-icon">➕</div>
+      <div>
+        <div class="tile-title">Register Vehicle</div>
+        <div class="tile-sub">Add a new vehicle to the system</div>
+      </div>
+    </div>
+    <button class="btn btn-secondary" onclick="openRegisterForm({})">Register Vehicle Manually</button>
+    <div class="stat-row">
+      <div class="stat"><div class="stat-num" id="statCleared">0</div><div class="stat-label">Cleared today</div></div>
+      <div class="stat"><div class="stat-num" id="statFlagged">0</div><div class="stat-label">Flags today</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ CAMERA ============ -->
+<div class="screen" id="screen-camera">
+  <div class="topbar">
+    <button class="back-btn" onclick="cancelCamera()">‹ Cancel</button>
+  </div>
+  <div class="content">
+    <h2 id="cameraTitle">Scan Plate Number</h2>
+    <div class="camera-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="scan-frame" id="scanFrame"><div class="scan-line"></div></div>
+      <div class="scan-hint" id="scanHint">Align plate within the frame</div>
+    </div>
+    <canvas id="canvas"></canvas>
+    <button class="btn btn-primary btn-lg" id="captureBtn" onclick="captureAndScan()">📷 Capture & Read</button>
+    <button class="torch-btn" id="torchBtn" onclick="toggleTorch()">🔦 Flashlight Off</button>
+    <div id="ocrStatus" style="text-align:center; color:var(--muted); font-size:13px; margin-top:10px;"></div>
+    <button class="btn btn-secondary" onclick="skipToManual()">Skip — type in manually</button>
+  </div>
+</div>
+
+<!-- ============ VERIFY RESULT ============ -->
+<div class="screen" id="screen-result">
+  <div class="topbar">
+    <button class="back-btn" onclick="showScreen('screen-home')">‹ Home</button>
+  </div>
+  <div class="content" id="resultContent"></div>
+</div>
+
+<!-- ============ REGISTER FORM ============ -->
+<div class="screen" id="screen-register">
+  <div class="topbar">
+    <button class="back-btn" onclick="showScreen('screen-home')">‹ Home</button>
+  </div>
+  <div class="content">
+    <h2 id="regFormTitle">Register Vehicle</h2>
+    <p class="sub">Plate number and OR/CR expiry are required. Everything else can be filled in when there's time.</p>
+
+    <label>Plate Number <span class="req">*</span></label>
+    <input type="text" id="regPlate" class="mono" placeholder="ABC 1234">
+
+    <label>OR/CR Expiry Date <span class="req">*</span></label>
+    <input type="date" id="regOrcr">
+
+    <label>Vehicle Type</label>
+    <select id="regType">
+      <option value="">Select type</option>
+      <option>Motorcycle</option><option>Sedan</option><option>SUV</option>
+      <option>Van</option><option>Pickup</option><option>Truck</option>
+      <option>Tricycle</option><option>Jeepney/PUV</option><option>Other</option>
+    </select>
+
+    <label>Make / Model</label>
+    <input type="text" id="regMake" placeholder="e.g. Toyota Vios">
+    <label>Color</label>
+    <input type="text" id="regColor" placeholder="e.g. White">
+
+    <h2 style="margin-top:26px;">Driver</h2>
+    <button class="btn btn-secondary" onclick="openLicenseCamera()">📷 Scan Driver's License</button>
+    <label>Driver Name</label>
+    <input type="text" id="regDriverName" placeholder="Full name">
+    <label>License Number</label>
+    <input type="text" id="regLicense" class="mono" placeholder="License number">
+    <label>License Expiry</label>
+    <input type="date" id="regLicenseExpiry">
+    <label>Contact Number</label>
+    <input type="text" id="regContact" placeholder="09XX XXX XXXX">
+
+    <button class="btn btn-primary btn-lg" id="regSaveBtn" onclick="submitRegister()">Save Vehicle</button>
+  </div>
+</div>
+
+<!-- ============ ADMIN LOGIN ============ -->
+<div class="screen" id="screen-admin-login">
+  <div class="content" style="padding-top:70px;">
+    <button class="back-btn" onclick="showScreen('screen-login')">‹ Back</button>
+    <h1>Admin Login</h1>
+    <p class="sub">Manage records, drivers, and thresholds.</p>
+    <label>Admin Password</label>
+    <input type="password" id="adminPassword" placeholder="••••••••">
+    <button class="btn btn-primary btn-lg" onclick="adminLogin()">Log In</button>
+  </div>
+</div>
+
+<!-- ============ ADMIN PANEL ============ -->
+<div class="screen" id="screen-admin">
+  <div class="topbar">
+    <div class="brand-text">Admin Panel</div>
+    <button class="link-btn" onclick="showScreen('screen-login')">Log Out</button>
+  </div>
+  <div class="content">
+    <div class="tabs">
+      <div class="tab active" data-tab="vehicles" onclick="switchAdminTab('vehicles')">Vehicles</div>
+      <div class="tab" data-tab="drivers" onclick="switchAdminTab('drivers')">Drivers</div>
+      <div class="tab" data-tab="logs" onclick="switchAdminTab('logs')">Logs</div>
+      <div class="tab" data-tab="settings" onclick="switchAdminTab('settings')">Settings</div>
+    </div>
+    <input type="text" class="search-box" id="adminSearch" placeholder="Search…" oninput="onAdminSearchInput()">
+    <button class="btn btn-secondary" onclick="exportCSV()" style="margin-bottom:14px;">⭳ Export current tab as CSV</button>
+    <div id="adminList"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================
+   CONFIG — paste your deployed Apps Script Web App URL here
+   ========================================================= */
+const CONFIG = {
+  API_URL: 'https://script.google.com/macros/s/AKfycbydXqmdW6QGThO2e6JftMo6dCISn64rsA360sc6ZncJEXaCA-JQHtv1CZeckLJN840UlA/exec/exec'
+};
+
+/* ---------------- State ---------------- */
+let state = {
+  officer: '', location: '', mode: 'verify',
+  stream: null, adminPassword: '', settings: { GreenDays: 30, YellowDays: 15, OrangeDays: 1 },
+  adminData: { vehicles: [], drivers: [], logs: [] }, adminTab: 'vehicles',
+  pendingPlate: '', clearedToday: 0, flaggedToday: 0
+};
+
+/* ---------------- Boot ---------------- */
+window.addEventListener('DOMContentLoaded', () => {
+  if (!CONFIG.API_URL || CONFIG.API_URL.indexOf('PASTE_') === 0) {
+    document.getElementById('configWarn').style.display = 'block';
+  }
+  const savedOfficer = localStorage.getItem('cp_officer');
+  const savedLocation = localStorage.getItem('cp_location');
+  if (savedOfficer) {
+    state.officer = savedOfficer; state.location = savedLocation || '';
+    goHome();
+  }
+  loadSettings();
+  initTheme();
+  initAutoUppercase();
+});
+
+/* ---------------- Theme (dark/light) ---------------- */
+function initTheme() {
+  const t = document.documentElement.getAttribute('data-theme') || 'dark';
+  document.getElementById('themeToggle').textContent = t === 'light' ? '☀️' : '🌙';
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('cp_theme', next); } catch (e) {}
+  document.getElementById('themeToggle').textContent = next === 'light' ? '☀️' : '🌙';
+}
+
+/* ---------------- Auto-uppercase manual text entry ----------------
+   Covers registration/verification fields, both in-form and typed inline.
+   Number/date/password fields are left alone; free-text prompt() popups
+   are uppercased via the upPrompt() helper below. */
+function initAutoUppercase() {
+  const ids = [
+    'loginOfficer', 'loginLocation',
+    'regPlate', 'regMake', 'regColor', 'regDriverName', 'regLicense', 'regContact'
+  ];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) autoUppercase_(el);
+  });
+}
+
+function autoUppercase_(el) {
+  el.addEventListener('input', () => {
+    const start = el.selectionStart, end = el.selectionEnd;
+    const upper = el.value.toUpperCase();
+    if (upper !== el.value) {
+      el.value = upper;
+      try { el.setSelectionRange(start, end); } catch (e) {}
+    }
+  });
+}
+
+// Wraps prompt() so quick popup edits (plate confirm, admin edit fields,
+// flag reasons, etc.) are stored in upper case just like form fields.
+function upPrompt(msg, def) {
+  const v = prompt(msg, def);
+  if (v === null) return null;
+  return v.toUpperCase();
+}
+
+/* ---------------- API helper ---------------- */
+async function api(action, data) {
+  if (!CONFIG.API_URL || CONFIG.API_URL.indexOf('PASTE_') === 0) {
+    toast('API not configured — see setup guide.');
+    throw new Error('API not configured');
+  }
+  const res = await fetch(CONFIG.API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids CORS preflight on Apps Script
+    body: JSON.stringify({ action, data })
+  });
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || 'Request failed');
+  return json;
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  if (id !== 'screen-camera') stopCamera();
+}
+
+/* ---------------- Login / shift ---------------- */
+function startShift() {
+  const name = document.getElementById('loginOfficer').value.trim();
+  if (!name) { toast('Enter your name to start.'); return; }
+  state.officer = name;
+  state.location = document.getElementById('loginLocation').value.trim();
+  localStorage.setItem('cp_officer', name);
+  localStorage.setItem('cp_location', state.location);
+  goHome();
+}
+
+function endShift() {
+  localStorage.removeItem('cp_officer');
+  localStorage.removeItem('cp_location');
+  state.officer = ''; state.location = '';
+  showScreen('screen-login');
+}
+
+function goHome() {
+  document.getElementById('officerBar').textContent = state.officer + (state.location ? ' • ' + state.location : '');
+  document.getElementById('statCleared').textContent = state.clearedToday;
+  document.getElementById('statFlagged').textContent = state.flaggedToday;
+  showScreen('screen-home');
+}
+
+/* ---------------- Settings / color logic ---------------- */
+async function loadSettings() {
+  try {
+    const r = await api('getSettings', {});
+    state.settings = r.settings;
+  } catch (e) { /* keep defaults */ }
+}
+
+function statusFor(dateStr) {
+  if (!dateStr) return { color: 'gray', label: 'No data', days: null };
+  const today = new Date(); today.setHours(0,0,0,0);
+  const exp = new Date(dateStr); exp.setHours(0,0,0,0);
+  const days = Math.round((exp - today) / 86400000);
+  const g = Number(state.settings.GreenDays || 30);
+  const y = Number(state.settings.YellowDays || 15);
+  const o = Number(state.settings.OrangeDays || 1);
+  if (days < 0) return { color: 'red', label: 'Expired', days };
+  if (days <= o) return { color: 'orange', label: 'Expires in ' + days + 'd', days };
+  // Yellow covers everything from the orange cutoff up through the green
+  // cutoff (using whichever of Yellow/Green threshold is larger), so both
+  // settings actually matter even if a record's days-remaining only trips
+  // one of them.
+  if (days <= Math.max(y, g)) return { color: 'yellow', label: 'Expires in ' + days + 'd', days };
+  return { color: 'green', label: 'Valid', days };
+}
+
+function badgeHTML(status) {
+  return `<span class="badge badge-${status.color}"><span class="badge-dot"></span>${status.label}</span>`;
+}
+
+/* ---------------- Camera + OCR ---------------- */
+// state.scanTarget: 'plate' or 'license' — which field this camera session is reading for.
+// state.cameraReturnScreen: where "Cancel" goes back to.
+async function openCamera(mode) {
+  state.mode = mode;
+  state.scanTarget = 'plate';
+  state.cameraReturnScreen = 'screen-home';
+  document.getElementById('cameraTitle').textContent = mode === 'verify' ? 'Scan Plate to Verify' : 'Scan Plate to Register';
+  document.getElementById('scanHint').textContent = 'Align plate within the frame';
+  document.getElementById('captureBtn').textContent = '📷 Capture & Read Plate';
+  document.getElementById('scanFrame').classList.remove('scan-frame-card');
+  showScreen('screen-camera');
+  await startCameraStream();
+}
+
+async function openLicenseCamera() {
+  state.scanTarget = 'license';
+  state.cameraReturnScreen = 'screen-register';
+  document.getElementById('cameraTitle').textContent = "Scan Driver's License";
+  document.getElementById('scanHint').textContent = 'Align the whole license card within the frame';
+  document.getElementById('captureBtn').textContent = "📷 Capture & Fill In";
+  document.getElementById('scanFrame').classList.add('scan-frame-card');
+  showScreen('screen-camera');
+  await startCameraStream();
+}
+
+async function startCameraStream() {
+  try {
+    state.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } } });
+    document.getElementById('video').srcObject = state.stream;
+    setupTorch_();
+  } catch (e) {
+    toast('Camera unavailable — enter manually.');
+    skipToManual();
+  }
+}
+
+function stopCamera() {
+  if (state.stream) { state.stream.getTracks().forEach(t => t.stop()); state.stream = null; }
+  state.torchTrack = null;
+  state.torchOn = false;
+  const torchBtn = document.getElementById('torchBtn');
+  if (torchBtn) { torchBtn.style.display = 'none'; torchBtn.classList.remove('torch-active'); torchBtn.textContent = '🔦 Flashlight Off'; }
+}
+
+/* ---------------- Flashlight / torch (for night checkpoints) ---------------- */
+function setupTorch_() {
+  const torchBtn = document.getElementById('torchBtn');
+  const track = state.stream && state.stream.getVideoTracks()[0];
+  state.torchTrack = track || null;
+  state.torchOn = false;
+  torchBtn.classList.remove('torch-active');
+  torchBtn.textContent = '🔦 Flashlight Off';
+
+  const caps = (track && track.getCapabilities) ? track.getCapabilities() : {};
+  const supported = !!(caps && caps.torch);
+  torchBtn.style.display = supported ? 'flex' : 'none';
+}
+
+async function toggleTorch() {
+  if (!state.torchTrack) return;
+  try {
+    state.torchOn = !state.torchOn;
+    await state.torchTrack.applyConstraints({ advanced: [{ torch: state.torchOn }] });
+    const torchBtn = document.getElementById('torchBtn');
+    torchBtn.textContent = state.torchOn ? '🔦 Flashlight On' : '🔦 Flashlight Off';
+    torchBtn.classList.toggle('torch-active', state.torchOn);
+  } catch (e) {
+    state.torchOn = !state.torchOn; // revert on failure
+    toast('Flashlight not supported on this device.');
+  }
+}
+
+function cancelCamera() {
+  stopCamera();
+  showScreen(state.cameraReturnScreen || 'screen-home');
+}
+
+function skipToManual() {
+  stopCamera();
+  if (state.scanTarget === 'license') {
+    showScreen('screen-register');
+    return;
+  }
+  if (state.mode === 'verify') {
+    const plate = upPrompt('Enter plate number:');
+    if (plate) verifyPlate(plate); else showScreen('screen-home');
+  } else {
+    openRegisterForm({});
+  }
+}
+
+// Maps the on-screen guide box to actual pixel coordinates in the video's
+// native resolution, accounting for object-fit:cover scaling/cropping —
+// so we only OCR what's inside the box, not the whole busy camera frame.
+function getCropRect(video, frameEl) {
+  const vRect = video.getBoundingClientRect();
+  const fRect = frameEl.getBoundingClientRect();
+  const nativeW = video.videoWidth, nativeH = video.videoHeight;
+  const dispW = vRect.width, dispH = vRect.height;
+  const videoAspect = nativeW / nativeH, containerAspect = dispW / dispH;
+  let scale, offsetX = 0, offsetY = 0;
+  if (videoAspect > containerAspect) {
+    scale = dispH / nativeH;
+    offsetX = (nativeW * scale - dispW) / 2;
+  } else {
+    scale = dispW / nativeW;
+    offsetY = (nativeH * scale - dispH) / 2;
+  }
+  const relLeft = fRect.left - vRect.left;
+  const relTop = fRect.top - vRect.top;
+  return {
+    sx: Math.max(0, (relLeft + offsetX) / scale),
+    sy: Math.max(0, (relTop + offsetY) / scale),
+    sw: fRect.width / scale,
+    sh: fRect.height / scale
+  };
+}
+
+async function captureAndScan() {
+  const video = document.getElementById('video');
+  const frameEl = document.getElementById('scanFrame');
+  const canvas = document.getElementById('canvas');
+  const captureBtn = document.getElementById('captureBtn');
+  const isLicense = state.scanTarget === 'license';
+
+  captureBtn.disabled = true;
+  document.getElementById('ocrStatus').textContent = isLicense ? 'Reading license…' : 'Reading plate…';
+
+  try {
+    if (!video.videoWidth || !video.videoHeight) {
+      // Camera feed not ready yet (e.g. capture tapped too fast) — bail out
+      // cleanly instead of drawing a zero-size image, which would throw.
+      document.getElementById('ocrStatus').textContent = 'Camera still starting — try again in a moment.';
+      return;
+    }
+
+    const { sx, sy, sw, sh } = getCropRect(video, frameEl);
+
+    // Upscale the cropped region — OCR does much better on larger text —
+    // and run it through grayscale/contrast so faint or glare-washed
+    // characters stand out more before Tesseract sees them. The license
+    // crop already covers a much larger area than the plate strip, so it
+    // gets a smaller upscale factor to keep OCR fast (bigger multiplier
+    // there would mean far more pixels to process, adding delay).
+    const UPSCALE = isLicense ? 1.5 : 3;
+    canvas.width = sw * UPSCALE;
+    canvas.height = sh * UPSCALE;
+    const ctx = canvas.getContext('2d');
+    ctx.filter = 'grayscale(1) contrast(1.6) brightness(1.05)';
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+
+    const { data: { text } } = await Tesseract.recognize(canvas, 'eng', isLicense ? {
+      // Full card: multiple lines, mixed letters/numbers/punctuation — no whitelist,
+      // PSM 6 (uniform block of text) reads the whole card in one pass.
+      tessedit_pageseg_mode: '6'
+    } : {
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -',
+      tessedit_pageseg_mode: '7' // treat the crop as a single line of text
+    });
+
+    if (isLicense) {
+      const parsed = parseLicenseText_(text);
+      applyLicenseScan_(parsed); // switches screen + toasts; no separate ocrStatus needed
+    } else {
+      const cleaned = text.replace(/[^A-Z0-9 -]/gi, '').trim().toUpperCase();
+      document.getElementById('ocrStatus').textContent = cleaned ? 'Read: ' + cleaned : 'Could not read clearly — try again or enter manually.';
+      if (cleaned && cleaned.length >= 4) confirmPlate(cleaned);
+    }
+  } catch (e) {
+    document.getElementById('ocrStatus').textContent = 'OCR failed — enter manually.';
+  } finally {
+    // Always re-enable, even if the button's owning screen has since changed
+    // (e.g. a successful license scan already navigated to screen-register).
+    captureBtn.disabled = false;
+  }
+}
+
+function confirmPlate(guess) {
+  const plate = upPrompt('Confirm plate number:', guess);
+  if (!plate) return;
+  stopCamera();
+  if (state.mode === 'verify') verifyPlate(plate);
+  else openRegisterForm({ plate });
+}
+
+// ---- Driver's license: one capture -> parse name, license no., and expiry,
+// then drop straight into the register form's inputs (no confirm prompts,
+// so there's no delay — the officer just glances and taps Save/edits inline).
+function parseLicenseText_(rawText) {
+  const text = rawText.toUpperCase();
+  const out = { licenseNumber: '', driverName: '', expiry: '', any: false };
+
+  // License No. — LTO format like "K18-25-004638" (letter + 2 digits, 2 digits, 6 digits).
+  // Accepts OCR runs that dropped the dashes and puts them back.
+  let m = text.match(/([A-Z])\s*[-]?\s*(\d{2})\s*[-]?\s*(\d{2})\s*[-]?\s*(\d{6})/);
+  if (m) { out.licenseNumber = `${m[1]}${m[2]}-${m[3]}-${m[4]}`; out.any = true; }
+
+  // Name — the printed line is "LASTNAME, FIRSTNAME MIDDLENAME". Scanning
+  // line-by-line (not the whole block) avoids a greedy cross-line match, and
+  // "exactly one comma, no digits, not a known label" rules out false hits
+  // like the address line ("LUMBO, LAGONGLONG, MISAMIS ORIENTAL, 9006"),
+  // which also fits a naive comma-pair pattern.
+  const NAME_LABELS = /REPUBLIC|PHILIPPIN|TRANSPORT|LICENSE|DEPARTMENT|ADDRESS|NATIONALITY|BLOOD|EYES|CONDITION|WEIGHT|HEIGHT/;
+  let nameMatch = null;
+  for (const line of text.split('\n')) {
+    if (/\d/.test(line)) continue; // a real name has no digits; filters out address/DOB lines
+    if ((line.match(/,/g) || []).length !== 1) continue; // name line has exactly one comma
+    if (NAME_LABELS.test(line)) continue;
+    const mm = line.match(/([A-Z][A-Z'\-]+(?:[ \t]+[A-Z][A-Z'\-]+)*)[ \t]*,[ \t]*([A-Z][A-Z'\-]+(?:[ \t]+[A-Z][A-Z'\-]+)*)/);
+    if (mm) { nameMatch = mm; break; }
+  }
+  if (nameMatch) {
+    const last = nameMatch[1].trim(), rest = nameMatch[2].trim();
+    out.driverName = toTitleCase_(`${rest} ${last}`);
+    out.any = true;
+  }
+
+  // Expiration date — dates on the card are YYYY/MM/DD. Date of Birth also
+  // matches the same pattern, so of all dates found, the expiry is the one
+  // furthest in the future (birth date is always earliest, expiry latest).
+  const dateMatches = [...text.matchAll(/(19|20)\d{2}[\/\-.](0?[1-9]|1[0-2])[\/\-.](0?[1-9]|[12]\d|3[01])/g)];
+  if (dateMatches.length) {
+    const dates = dateMatches.map(dm => dm[0].replace(/[\/.]/g, '-'))
+      .map(s => { const p = s.split('-'); return `${p[0]}-${p[1].padStart(2,'0')}-${p[2].padStart(2,'0')}`; });
+    out.expiry = dates.sort().pop(); // latest = expiry
+    out.any = true;
+  }
+
+  return out;
+}
+
+function toTitleCase_(s) {
+  return s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function applyLicenseScan_(parsed) {
+  stopCamera();
+  showScreen('screen-register');
+  if (parsed.licenseNumber) document.getElementById('regLicense').value = parsed.licenseNumber;
+  if (parsed.driverName) document.getElementById('regDriverName').value = parsed.driverName;
+  if (parsed.expiry) document.getElementById('regLicenseExpiry').value = parsed.expiry;
+  if (parsed.any) {
+    toast('License scanned — verify the filled-in fields.');
+  } else {
+    toast('Could not read the license — enter details manually.');
+    document.getElementById('regLicense').focus();
+  }
+}
+
+/* ---------------- Verify flow ---------------- */
+// Very short client-side cache so an accidental double-scan of the same
+// plate (common with OCR retries) shows the result instantly instead of
+// waiting on another round trip to Apps Script.
+const LOOKUP_CACHE_MS = 8000;
+if (!state.lookupCache) state.lookupCache = {};
+
+async function verifyPlate(plateInput) {
+  const plate = plateInput.toUpperCase().replace(/[\s-]/g, '');
+  document.getElementById('resultContent').innerHTML = '<div class="spinner"></div>';
+  showScreen('screen-result');
+
+  const cached = state.lookupCache[plate];
+  if (cached && (Date.now() - cached.at) < LOOKUP_CACHE_MS) {
+    if (!cached.found) renderNotFound(plate); else renderFound(cached.vehicle, cached.lastDriver, plate);
+    return;
+  }
+
+  try {
+    const r = await api('lookupPlate', { plate });
+    state.lookupCache[plate] = { at: Date.now(), found: r.found, vehicle: r.vehicle, lastDriver: r.lastDriver };
+    if (!r.found) {
+      renderNotFound(plate);
+      return;
+    }
+    renderFound(r.vehicle, r.lastDriver, plate);
+  } catch (e) {
+    document.getElementById('resultContent').innerHTML = '<p class="sub">Error looking up plate. Check your connection.</p>';
+  }
+}
+
+function renderNotFound(plate) {
+  document.getElementById('resultContent').innerHTML = `
+    <div class="card">
+      <div class="plate-chip">${plate}</div>
+      <div class="not-found-box" style="margin-top:14px;">
+        Not on file yet.<br>Register this vehicle now to speed up the next stop.
+      </div>
+      <button class="btn btn-primary btn-lg" onclick='openRegisterForm({plate:"${plate}"})'>Register This Vehicle</button>
+    </div>`;
+}
+
+function renderFound(vehicle, driver, plate) {
+  const vStatus = statusFor(vehicle.OrCrExpiry);
+  const dStatus = driver ? statusFor(driver.LicenseExpiry) : null;
+  state.pendingPlate = plate;
+  state.pendingLicense = driver ? driver.LicenseNumber : '';
+  state.pendingDriverName = driver ? driver.DriverName : '';
+  state.currentVehicle = vehicle;
+  state.currentDriver = driver;
+
+  let html = `
+    <div class="card">
+      <div class="card-head">
+        <div class="plate-chip">${plate}</div>
+        ${badgeHTML(vStatus)}
+      </div>
+      <div class="field-row"><span class="field-label">OR/CR Expiry</span><span class="field-val">${fmtDate(vehicle.OrCrExpiry)}</span></div>
+      <div class="field-row"><span class="field-label">Type</span><span class="field-val">${vehicle.VehicleType || '—'}</span></div>
+      <div class="field-row"><span class="field-label">Make / Model</span><span class="field-val">${vehicle.MakeModel || '—'}</span></div>
+      <div class="field-row"><span class="field-label">Color</span><span class="field-val">${vehicle.Color || '—'}</span></div>
+    </div>`;
+
+  if (driver) {
+    html += `
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div style="font-weight:700; font-size:15px;">${driver.DriverName || 'Unnamed driver'}</div>
+          <div style="color:var(--muted); font-size:12px; font-family:var(--mono);">${driver.LicenseNumber}</div>
+        </div>
+        ${badgeHTML(dStatus)}
+      </div>
+      <div class="field-row"><span class="field-label">License Expiry</span><span class="field-val">${fmtDate(driver.LicenseExpiry)}</span></div>
+      <div class="field-row"><span class="field-label">Contact</span><span class="field-val">${driver.Contact || '—'}</span></div>
+      <div class="alert-box">Last recorded driver for this vehicle. Confirm this matches who's driving now — tap "Different driver" below if not.</div>
+    </div>`;
+  } else {
+    html += `<div class="card"><div class="not-found-box">No driver on file for this vehicle yet.</div></div>`;
+  }
+
+  html += `
+    <button class="btn btn-primary btn-lg" onclick="clearVehicle('cleared')">✓ Mark Cleared</button>
+    <button class="btn btn-secondary" onclick="openDifferentDriver()">Different driver behind the wheel</button>
+    <button class="btn btn-danger" onclick="flagVehicle()">⚑ Flag for follow-up</button>
+    <button class="btn btn-secondary" onclick="editCurrentVehicle()">Edit vehicle details</button>
+  `;
+  document.getElementById('resultContent').innerHTML = html;
+}
+
+function editCurrentVehicle() {
+  const v = state.currentVehicle || { PlateNumber: state.pendingPlate };
+  const d = state.currentDriver || {};
+  openRegisterForm({
+    isEdit: true,
+    plate: v.PlateNumber,
+    orcrExpiry: v.OrCrExpiry,
+    vehicleType: v.VehicleType,
+    makeModel: v.MakeModel,
+    color: v.Color,
+    driverName: d.DriverName,
+    licenseNumber: d.LicenseNumber,
+    licenseExpiry: d.LicenseExpiry,
+    contact: d.Contact
+  });
+}
+
+function openDifferentDriver() {
+  const name = upPrompt("Current driver's name:");
+  if (!name) return;
+  const license = upPrompt("Driver's license number (optional):") || '';
+  state.pendingDriverName = name;
+  state.pendingLicense = license;
+  toast('Driver noted for this stop.');
+  clearVehicle('cleared', 'Driver differs from last on file');
+}
+
+function flagVehicle() {
+  const reason = upPrompt('Reason for flagging this vehicle (e.g. expired documents, no OR/CR, suspicious):') || '';
+  clearVehicle('flagged', reason);
+}
+
+async function clearVehicle(status, notes) {
+  try {
+    await api('logCheckpoint', {
+      plate: state.pendingPlate,
+      licenseNumber: state.pendingLicense || '',
+      driverName: state.pendingDriverName || '',
+      officer: state.officer,
+      location: state.location,
+      status: status,
+      notes: notes || ''
+    });
+    if (status === 'cleared') state.clearedToday++; else state.flaggedToday++;
+    toast(status === 'cleared' ? 'Marked cleared.' : 'Flagged for follow-up.');
+    goHome();
+  } catch (e) {
+    toast('Could not log — check connection.');
+  }
+}
+
+function fmtDate(d) {
+  if (!d) return '—';
+  const dt = new Date(d);
+  if (isNaN(dt)) return d;
+  return dt.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/* ---------------- Register flow ---------------- */
+function openRegisterForm(prefill) {
+  prefill = prefill || {};
+  state.editMode = !!prefill.isEdit;
+  showScreen('screen-register');
+  document.getElementById('regFormTitle').textContent = state.editMode ? 'Edit Vehicle' : 'Register Vehicle';
+  document.getElementById('regSaveBtn').textContent = state.editMode ? 'Update Vehicle' : 'Save Vehicle';
+  document.getElementById('regPlate').value = prefill.plate || '';
+  document.getElementById('regOrcr').value = fmtInputDate(prefill.orcrExpiry);
+  document.getElementById('regType').value = prefill.vehicleType || '';
+  document.getElementById('regMake').value = prefill.makeModel || '';
+  document.getElementById('regColor').value = prefill.color || '';
+  document.getElementById('regDriverName').value = prefill.driverName || '';
+  document.getElementById('regLicense').value = prefill.licenseNumber || '';
+  document.getElementById('regLicenseExpiry').value = fmtInputDate(prefill.licenseExpiry);
+  document.getElementById('regContact').value = prefill.contact || '';
+}
+
+async function submitRegister() {
+  const plate = document.getElementById('regPlate').value.trim();
+  const orcr = document.getElementById('regOrcr').value;
+  if (!plate || !orcr) { toast('Plate number and OR/CR expiry are required.'); return; }
+  const driverName = document.getElementById('regDriverName').value;
+  const licenseNumber = document.getElementById('regLicense').value;
+  if (!licenseNumber.trim()) {
+    if (!confirm('No license number entered — save without it?')) return;
+  }
+  try {
+    await api('registerVehicle', {
+      plate, orcrExpiry: orcr,
+      vehicleType: document.getElementById('regType').value,
+      makeModel: document.getElementById('regMake').value,
+      color: document.getElementById('regColor').value,
+      driverName: driverName,
+      licenseNumber: licenseNumber,
+      licenseExpiry: document.getElementById('regLicenseExpiry').value,
+      contact: document.getElementById('regContact').value
+    });
+    if (!state.editMode) {
+      // Registering at a checkpoint counts as processing that stop — log it too,
+      // so CheckpointLog reflects every vehicle handled, not just re-scans.
+      try {
+        await api('logCheckpoint', {
+          plate, licenseNumber: licenseNumber, driverName: driverName,
+          officer: state.officer, location: state.location,
+          status: 'cleared', notes: 'Registered at checkpoint'
+        });
+      } catch (logErr) { /* vehicle is saved either way; log failure is non-fatal */ }
+    }
+    if (state.lookupCache) delete state.lookupCache[normalizePlateClient_(plate)];
+    toast(state.editMode ? 'Vehicle updated.' : 'Vehicle saved.');
+    goHome();
+  } catch (e) {
+    toast('Could not save — check connection.');
+  }
+}
+
+function normalizePlateClient_(plate) {
+  return String(plate || '').toUpperCase().replace(/[\s-]/g, '');
+}
+
+/* ---------------- Admin ---------------- */
+async function adminLogin() {
+  const pw = document.getElementById('adminPassword').value;
+  try {
+    const r = await api('adminLogin', { password: pw });
+    if (!r.ok) { toast('Incorrect password.'); return; }
+    state.adminPassword = pw;
+    await loadAdminData();
+    showScreen('screen-admin');
+  } catch (e) { toast('Login failed.'); }
+}
+
+async function loadAdminData() {
+  document.getElementById('adminList').innerHTML = '<div class="spinner"></div>';
+  const r = await api('adminGetAll', {});
+  // Precompute a lowercase search blob per row once, up front, instead of
+  // re-stringifying + re-lowercasing every row on every keystroke — keeps
+  // typing in the search box smooth even with large tables.
+  ['vehicles', 'drivers', 'logs'].forEach(k => {
+    (r[k] || []).forEach(row => { row._search = JSON.stringify(row).toLowerCase(); });
+  });
+  state.adminData = r;
+  renderAdminTab();
+}
+
+function switchAdminTab(tab) {
+  state.adminTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.getElementById('adminSearch').style.display = tab === 'settings' ? 'none' : 'block';
+  renderAdminTab();
+}
+
+// Debounced so fast typing doesn't re-render the list on every keystroke.
+let _searchDebounceTimer = null;
+function onAdminSearchInput() {
+  clearTimeout(_searchDebounceTimer);
+  _searchDebounceTimer = setTimeout(renderAdminTab, 150);
+}
+
+function renderAdminTab() {
+  const q = (document.getElementById('adminSearch').value || '').toLowerCase();
+  const list = document.getElementById('adminList');
+
+  if (state.adminTab === 'settings') { renderSettingsTab(); return; }
+
+  let rows = [];
+  if (state.adminTab === 'vehicles') rows = state.adminData.vehicles;
+  if (state.adminTab === 'drivers') rows = state.adminData.drivers;
+  if (state.adminTab === 'logs') rows = state.adminData.logs;
+
+  if (q) rows = rows.filter(r => r._search.includes(q));
+
+  if (!rows.length) { list.innerHTML = '<div class="empty-note">No records.</div>'; return; }
+
+  if (state.adminTab === 'vehicles') {
+    list.innerHTML = rows.map(v => {
+      const st = statusFor(v.OrCrExpiry);
+      return `<div class="admin-row">
+        <div class="admin-row-head">
+          <span class="plate-chip" style="font-size:14px; padding:3px 8px;">${v.PlateNumber}</span>
+          ${badgeHTML(st)}
+        </div>
+        <div>${v.MakeModel || '—'} · ${v.VehicleType || '—'} · ${v.Color || '—'}</div>
+        <div style="color:var(--muted);">OR/CR expiry: ${fmtDate(v.OrCrExpiry)}</div>
+        <div class="admin-row-actions">
+          <button onclick='editVehicle(${JSON.stringify(v.PlateNumber)})'>Edit</button>
+          <button onclick='deleteVehicle(${JSON.stringify(v.PlateNumber)})'>Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+  } else if (state.adminTab === 'drivers') {
+    list.innerHTML = rows.map(d => {
+      const st = statusFor(d.LicenseExpiry);
+      return `<div class="admin-row">
+        <div class="admin-row-head">
+          <span style="font-weight:700;">${d.DriverName || 'Unnamed'}</span>
+          ${badgeHTML(st)}
+        </div>
+        <div style="font-family:var(--mono); color:var(--muted);">${d.LicenseNumber}</div>
+        <div style="color:var(--muted);">License expiry: ${fmtDate(d.LicenseExpiry)} · ${d.Contact || '—'}</div>
+        <div class="admin-row-actions">
+          <button onclick='editDriver(${JSON.stringify(d.LicenseNumber)})'>Edit</button>
+          <button onclick='deleteDriver(${JSON.stringify(d.LicenseNumber)})'>Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+  } else {
+    list.innerHTML = rows.map(l => `<div class="admin-row">
+        <div class="admin-row-head">
+          <span class="plate-chip" style="font-size:13px; padding:3px 8px;">${l.PlateNumber}</span>
+          <span class="badge badge-${l.Status === 'cleared' ? 'green' : 'orange'}">${l.Status}</span>
+        </div>
+        <div>${l.DriverName || '—'} · Officer: ${l.Officer || '—'}</div>
+        <div style="color:var(--muted);">${l.Location || '—'} · ${fmtDate(l.Timestamp)} ${new Date(l.Timestamp).toLocaleTimeString()}</div>
+        ${l.Notes ? `<div class="alert-box" style="margin-top:8px;">${l.Notes}</div>` : ''}
+      </div>`).join('');
+  }
+}
+
+function renderSettingsTab() {
+  document.getElementById('adminList').innerHTML = `
+    <div class="card">
+      <label>Green threshold (days remaining, no concern)</label>
+      <input type="number" id="setGreen" value="${state.settings.GreenDays}">
+      <label>Yellow threshold (days remaining, expiring soon)</label>
+      <input type="number" id="setYellow" value="${state.settings.YellowDays}">
+      <label>Orange threshold (days remaining, expires very soon)</label>
+      <input type="number" id="setOrange" value="${state.settings.OrangeDays}">
+      <button class="btn btn-primary" onclick="saveSettings()">Save Thresholds</button>
+    </div>`;
+}
+
+async function saveSettings() {
+  try {
+    await api('updateSettings', {
+      adminPassword: state.adminPassword,
+      GreenDays: Number(document.getElementById('setGreen').value),
+      YellowDays: Number(document.getElementById('setYellow').value),
+      OrangeDays: Number(document.getElementById('setOrange').value)
+    });
+    await loadSettings();
+    toast('Thresholds updated.');
+  } catch (e) { toast('Could not save settings.'); }
+}
+
+// Vehicles/drivers are looked up and updated by their natural key (plate /
+// license number) rather than a snapshotted sheet row number. Row numbers
+// can shift between when the admin list was loaded and when an edit is
+// saved (another officer registering/deleting a vehicle in between), which
+// would otherwise silently edit or delete the wrong record.
+function editVehicle(plateKey) {
+  const v = state.adminData.vehicles.find(x => x.PlateNumber === plateKey);
+  if (!v) return;
+  const plate = upPrompt('Plate number:', v.PlateNumber) ?? v.PlateNumber;
+  const orcr = prompt('OR/CR expiry (YYYY-MM-DD):', fmtInputDate(v.OrCrExpiry)) ?? v.OrCrExpiry;
+  const type = upPrompt('Vehicle type:', v.VehicleType) ?? v.VehicleType;
+  const make = upPrompt('Make/Model:', v.MakeModel) ?? v.MakeModel;
+  const color = upPrompt('Color:', v.Color) ?? v.Color;
+  api('adminUpdateVehicle', {
+    adminPassword: state.adminPassword, plateKey: plateKey,
+    vehicle: { PlateNumber: plate, OrCrExpiry: orcr, VehicleType: type, MakeModel: make, Color: color }
+  }).then(() => { toast('Updated.'); loadAdminData(); }).catch(() => toast('Update failed.'));
+}
+
+function deleteVehicle(plateKey) {
+  if (!confirm('Delete this vehicle record?')) return;
+  api('adminDeleteVehicle', { adminPassword: state.adminPassword, plateKey: plateKey })
+    .then(() => { toast('Deleted.'); loadAdminData(); }).catch(() => toast('Delete failed.'));
+}
+
+function editDriver(licenseKey) {
+  const d = state.adminData.drivers.find(x => x.LicenseNumber === licenseKey);
+  if (!d) return;
+  const name = upPrompt('Driver name:', d.DriverName) ?? d.DriverName;
+  const license = upPrompt('License number:', d.LicenseNumber) ?? d.LicenseNumber;
+  const expiry = prompt('License expiry (YYYY-MM-DD):', fmtInputDate(d.LicenseExpiry)) ?? d.LicenseExpiry;
+  const contact = upPrompt('Contact number:', d.Contact) ?? d.Contact;
+  api('adminUpdateDriver', {
+    adminPassword: state.adminPassword, licenseKey: licenseKey,
+    driver: { LicenseNumber: license, DriverName: name, LicenseExpiry: expiry, Contact: contact }
+  }).then(() => { toast('Updated.'); loadAdminData(); }).catch(() => toast('Update failed.'));
+}
+
+function deleteDriver(licenseKey) {
+  if (!confirm('Delete this driver record?')) return;
+  api('adminDeleteDriver', { adminPassword: state.adminPassword, licenseKey: licenseKey })
+    .then(() => { toast('Deleted.'); loadAdminData(); }).catch(() => toast('Delete failed.'));
+}
+
+function fmtInputDate(d) {
+  if (!d) return '';
+  const dt = new Date(d);
+  if (isNaN(dt)) return d;
+  return dt.toISOString().slice(0, 10);
+}
+
+function exportCSV() {
+  let rows = [];
+  if (state.adminTab === 'vehicles') rows = state.adminData.vehicles;
+  else if (state.adminTab === 'drivers') rows = state.adminData.drivers;
+  else if (state.adminTab === 'logs') rows = state.adminData.logs;
+  if (!rows.length) { toast('Nothing to export.'); return; }
+  const keys = Object.keys(rows[0]).filter(k => k !== '_row');
+  const csv = [keys.join(',')].concat(
+    rows.map(r => keys.map(k => `"${String(r[k] ?? '').replace(/"/g, '""')}"`).join(','))
+  ).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = state.adminTab + '_export.csv';
+  a.click();
+}
+</script>
+</body>
+</html>
